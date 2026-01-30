@@ -1,0 +1,23 @@
+# Xcode / SwiftPM
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Local secrets (do not commit)
+FitTrack/SupabaseConfig.plist
+.env
+.env.*
