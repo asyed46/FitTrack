@@ -11,6 +11,8 @@ struct ProfileView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var supabase: SupabaseService
     @State private var signOutStatus: String?
+    @State private var deleteStatus: String?
+    @State private var isShowingDeleteConfirm = false
     
     var body: some View {
         NavigationStack {
@@ -88,8 +90,20 @@ struct ProfileView: View {
                             Text("Sign Out")
                         }
 
+                        Button(role: .destructive) {
+                            isShowingDeleteConfirm = true
+                        } label: {
+                            Text("Delete Account")
+                        }
+
                         if let signOutStatus {
                             Text(signOutStatus)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+
+                        if let deleteStatus {
+                            Text(deleteStatus)
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -97,6 +111,14 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("Profile")
+            .alert("Delete Account?", isPresented: $isShowingDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    deleteAccount()
+                }
+            } message: {
+                Text("This will permanently delete your account and data.")
+            }
         }
     }
 
@@ -113,6 +135,24 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     signOutStatus = "Sign out failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func deleteAccount() {
+        deleteStatus = "Deleting account..."
+        Task {
+            do {
+                try await supabase.deleteAccount()
+                await MainActor.run {
+                    appState.currentUser = nil
+                    appState.groups = []
+                    deleteStatus = nil
+                }
+            } catch {
+                await MainActor.run {
+                    deleteStatus = "Delete failed: \(error.localizedDescription)"
                 }
             }
         }

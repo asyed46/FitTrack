@@ -176,6 +176,19 @@ final class SupabaseService: ObservableObject {
         authEmail = nil
     }
 
+    @MainActor
+    func deleteAccount() async throws {
+        let session = try await client.auth.session
+        client.functions.setAuth(token: session.accessToken)
+        _ = try await client.functions.invoke(
+            "delete-account",
+            options: FunctionInvokeOptions(
+                headers: ["authorization": "Bearer \(session.accessToken)"]
+            )
+        )
+        try await signOut()
+    }
+
     func fetchProfile(userId: UUID) async throws -> ProfileRow? {
         let rows: [ProfileRow] = try await client
             .from("profiles")
