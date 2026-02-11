@@ -67,7 +67,7 @@ struct AuthLandingView: View {
 
             if isSignUp {
                 Button("I confirmed my email") {
-                    refreshSession()
+                    confirmAndSignIn()
                 }
                 .buttonStyle(.bordered)
                 .disabled(isLoading)
@@ -115,11 +115,29 @@ struct AuthLandingView: View {
         }
     }
 
-    private func refreshSession() {
+    private func confirmAndSignIn() {
+        guard !email.isEmpty, !password.isEmpty else {
+            statusText = "Enter your email and password, then try again."
+            return
+        }
+
         isLoading = true
         statusText = "Checking confirmation..."
         Task {
-            await tryRefreshSession()
+            do {
+                try await supabase.signIn(email: email, password: password)
+                await MainActor.run {
+                    isEmailConfirmed = true
+                    statusText = "Email confirmed. Signed in."
+                }
+                await updateLocalUser()
+                await loadUserWorkouts()
+                await loadUserGroups()
+            } catch {
+                await MainActor.run {
+                    statusText = "Not ready yet. Confirm the email link, then try again."
+                }
+            }
             await MainActor.run { isLoading = false }
         }
     }
