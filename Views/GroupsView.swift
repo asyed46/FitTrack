@@ -16,6 +16,7 @@ struct GroupsView: View {
     @State private var joinCode = ""
     @State private var showJoinError = false
     @State private var isLoading = false
+    @State private var groupRanks: [UUID: Int] = [:]
     
     var body: some View {
         NavigationStack {
@@ -39,7 +40,10 @@ struct GroupsView: View {
                 } else {
                     ForEach(appState.groups) { group in
                         NavigationLink(destination: LeaderboardView(group: group)) {
-                            GroupRowView(group: group)
+                            GroupRowView(
+                                group: group,
+                                rank: groupRanks[group.id]
+                            )
                         }
                     }
                 }
@@ -80,15 +84,39 @@ struct GroupsView: View {
         do {
             let groups = try await supabase.fetchMyGroups()
             appState.setGroups(groups)
+            await refreshRanks(for: groups)
         } catch {
             // Ignore; user can still create/join.
         }
     }
+
+    @MainActor
+    private func refreshRanks(for groups: [Group]) async {
+        guard let userId = appState.currentUser?.id else {
+            groupRanks = [:]
+            return
+        }
+
+        var ranks: [UUID: Int] = [:]
+
+        for group in groups {
+            do {
+                let leaderboard = try await supabase.fetchGroupLeaderboard(groupId: group.id)
+                if let index = leaderboard.firstIndex(where: { $0.id == userId }) {
+                    ranks[group.id] = index + 1
+                }
+            } catch {
+                // Keep this group unset rather than showing an incorrect rank.
+            }
+        }
+
+        groupRanks = ranks
+    }
 }
 
 struct GroupRowView: View {
-    @EnvironmentObject var appState: AppState
     let group: Group
+    let rank: Int?
     
     var body: some View {
         HStack {
@@ -99,13 +127,20 @@ struct GroupRowView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
             Spacer()
-            if let user = appState.currentUser {
-                let rank = appState.getUserRanking(in: group)
-                Text("#\(rank)")
-                    .font(.title3)
-                    .fontWeight(.bold)
-                    .foregroundColor(.blue)
+
+            if let rank {
+                HStack(spacing: 6) {
+                    Text("Rank #\(rank)")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+                    if rank <= 3 {
+                        Image(systemName: rank == 1 ? "trophy.fill" : rank == 2 ? "medal.fill" : "medal")
+                            .foregroundColor(rank == 1 ? .yellow : .gray)
+                    }
+                }
             }
         }
         .padding(.vertical, 4)

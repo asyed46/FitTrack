@@ -9,6 +9,8 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var supabase: SupabaseService
+    @State private var groupRanks: [UUID: Int] = [:]
     
     var body: some View {
         NavigationStack {
@@ -29,7 +31,10 @@ struct HomeView: View {
                             
                             ForEach(appState.groups) { group in
                                 NavigationLink(destination: LeaderboardView(group: group)) {
-                                    GroupCardView(group: group)
+                                    GroupCardView(
+                                        group: group,
+                                        rank: groupRanks[group.id]
+                                    )
                                 }
                                 .buttonStyle(PlainButtonStyle())
                             }
@@ -70,6 +75,39 @@ struct HomeView: View {
                 }
             }
             .navigationTitle("FitTrack")
+            .task(id: rankReloadKey) {
+                await refreshServerRanks()
+            }
+        }
+    }
+
+    private var rankReloadKey: String {
+        let groupPart = appState.groups.map(\.id.uuidString).joined(separator: ",")
+        let userPart = appState.currentUser?.id.uuidString ?? "no-user"
+        return "\(userPart)|\(groupPart)"
+    }
+
+    private func refreshServerRanks() async {
+        guard let userId = appState.currentUser?.id else {
+            await MainActor.run { groupRanks = [:] }
+            return
+        }
+
+        var updatedRanks: [UUID: Int] = [:]
+
+        for group in appState.groups {
+            do {
+                let leaderboard = try await supabase.fetchGroupLeaderboard(groupId: group.id)
+                if let rankIndex = leaderboard.firstIndex(where: { $0.id == userId }) {
+                    updatedRanks[group.id] = rankIndex + 1
+                }
+            } catch {
+                // Leave this group unset so UI doesn't show an incorrect local rank.
+            }
+        }
+
+        await MainActor.run {
+            groupRanks = updatedRanks
         }
     }
 }
@@ -103,8 +141,8 @@ struct ScoreCardView: View {
 }
 
 struct GroupCardView: View {
-    @EnvironmentObject var appState: AppState
     let group: Group
+    let rank: Int?
     
     var body: some View {
         HStack {
@@ -123,21 +161,23 @@ struct GroupCardView: View {
             
             Spacer()
             
-            if let user = appState.currentUser {
-                let members = appState.getGroupMembers(for: group)
-                let rank = appState.getUserRanking(in: group)
-                
+            if let rank {
                 VStack(alignment: .trailing) {
                     Text("Rank #\(rank)")
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundColor(.blue)
                     
-                    if rank <= 3 && members.count > 0 {
+                    if rank <= 3 && group.memberIds.count > 0 {
                         Image(systemName: rank == 1 ? "trophy.fill" : rank == 2 ? "medal.fill" : "medal")
                             .foregroundColor(rank == 1 ? .yellow : .gray)
                     }
                 }
+            } else {
+                Text("Rank --")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.secondary)
             }
         }
         .padding()
