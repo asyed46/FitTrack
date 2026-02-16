@@ -273,6 +273,44 @@ final class SupabaseService: ObservableObject {
         return rows
     }
 
+    func refreshMemberPoints(groupId: UUID) async throws {
+        // Try common parameter names so this works across slightly different SQL function signatures.
+        do {
+            _ = try await client
+                .rpc("refresh_member_points", params: ["p_group_id": groupId.uuidString])
+                .execute()
+            return
+        } catch {
+            _ = try await client
+                .rpc("refresh_member_points", params: ["group_id": groupId.uuidString])
+                .execute()
+        }
+    }
+
+    func refreshMyGroupMemberPoints() async throws {
+        guard let userId = authUserId else { return }
+
+        let groups = try await fetchMyGroups()
+        if groups.isEmpty { return }
+
+        let workouts = try await fetchWorkoutsWithExercises(userId: userId)
+        let totalPoints = Int(workouts.reduce(0) { $0 + $1.score }.rounded())
+
+        for group in groups {
+            do {
+                try await client
+                    .from("group_members")
+                    .update(["total_points": totalPoints])
+                    .eq("group_id", value: group.id.uuidString)
+                    .eq("user_id", value: userId.uuidString)
+                    .execute()
+            } catch {
+                // Fallback for stricter RLS/function-based setups.
+                try? await refreshMemberPoints(groupId: group.id)
+            }
+        }
+    }
+
     func deleteGroup(groupId: UUID) async throws {
         struct DeleteGroupResponse: Codable {
             let ok: Bool
@@ -396,7 +434,7 @@ final class SupabaseService: ObservableObject {
             }
         } catch {
             // Best-effort cleanup to avoid orphan workouts if exercises insert fails.
-            try? await client
+            _ = try? await client
                 .from("workouts")
                 .delete()
                 .eq("id", value: workoutId.uuidString)
@@ -405,6 +443,92 @@ final class SupabaseService: ObservableObject {
         }
 
         return Workout(id: workoutId, userId: userId, date: date, exercises: exercises)
+    }
+
+    func updateExercise(
+        userId: UUID,
+        workoutId: UUID,
+        exercise: Exercise
+    ) async throws {
+        let row = WorkoutExerciseRow(
+            id: exercise.id,
+            workoutId: workoutId,
+            userId: userId,
+            type: exercise.type,
+            name: exercise.name,
+            duration: exercise.duration,
+            weight: exercise.weight,
+            reps: exercise.reps,
+            sets: exercise.sets,
+            distance: exercise.distance,
+            createdAt: nil
+        )
+
+        // Replace the existing exercise row with the updated values.
+        try await client
+            .from("workout_exercises")
+            .delete()
+            .eq("id", value: exercise.id.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+
+        try await client
+            .from("workout_exercises")
+            .insert(row)
+            .execute()
+
+        try await reconcileWorkoutAndMemberPoints(userId: userId, workoutId: workoutId)
+    }
+
+    func deleteExercise(
+        userId: UUID,
+        workoutId: UUID,
+        exerciseId: UUID
+    ) async throws {
+        try await client
+            .from("workout_exercises")
+            .delete()
+            .eq("id", value: exerciseId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+
+        try await reconcileWorkoutAndMemberPoints(userId: userId, workoutId: workoutId)
+    }
+
+    private func reconcileWorkoutAndMemberPoints(userId: UUID, workoutId: UUID) async throws {
+        let exerciseRows: [WorkoutExerciseRow] = try await client
+            .from("workout_exercises")
+            .select()
+            .eq("workout_id", value: workoutId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+            .value
+
+        if exerciseRows.isEmpty {
+            try await client
+                .from("workouts")
+                .delete()
+                .eq("id", value: workoutId.uuidString)
+                .eq("user_id", value: userId.uuidString)
+                .execute()
+        } else {
+            let types = Set(exerciseRows.map(\.type))
+            let title: String
+            if types.count == 1, let only = types.first {
+                title = only.rawValue
+            } else {
+                title = "Workout"
+            }
+
+            try await client
+                .from("workouts")
+                .update(["title": title])
+                .eq("id", value: workoutId.uuidString)
+                .eq("user_id", value: userId.uuidString)
+                .execute()
+        }
+
+        try await refreshMyGroupMemberPoints()
     }
 
     private func defaultTitle(for exercises: [Exercise]) -> String {

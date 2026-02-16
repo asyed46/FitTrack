@@ -84,7 +84,9 @@ struct HomeView: View {
     private var rankReloadKey: String {
         let groupPart = appState.groups.map(\.id.uuidString).joined(separator: ",")
         let userPart = appState.currentUser?.id.uuidString ?? "no-user"
-        return "\(userPart)|\(groupPart)"
+        let scorePart = Int(appState.currentUser?.totalScore ?? 0)
+        let workoutCountPart = appState.currentUser?.workouts.count ?? 0
+        return "\(userPart)|\(groupPart)|\(scorePart)|\(workoutCountPart)"
     }
 
     private func refreshServerRanks() async {

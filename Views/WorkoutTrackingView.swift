@@ -127,17 +127,19 @@ struct LogWorkoutView: View {
             statusText = "Sign in to save workouts."
             return
         }
-
         statusText = "Saving..."
         Task {
             do {
-                let workout = try await supabase.insertWorkoutWithExercises(
+                _ = try await supabase.insertWorkoutWithExercises(
                     userId: userId,
                     date: workoutDate,
                     exercises: exercises
                 )
+                // Recompute group member totals from source-of-truth workout data.
+                _ = try? await supabase.refreshMyGroupMemberPoints()
+                let serverWorkouts = try await supabase.fetchWorkoutsWithExercises(userId: userId)
                 await MainActor.run {
-                    appState.addWorkout(workout)
+                    appState.replaceWorkouts(serverWorkouts)
                     statusText = nil
                     showingSaveConfirmation = true
                 }
@@ -152,6 +154,7 @@ struct LogWorkoutView: View {
 
 struct WorkoutCalendarView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var supabase: SupabaseService
     @State private var selectedDate = Date()
     @State private var editContext: EditContext?
     
@@ -197,7 +200,22 @@ struct WorkoutCalendarView: View {
                                     editContext = EditContext(workout: workout, exercise: exercise)
                                 },
                                 onDelete: { exercise in
-                                    appState.deleteExercise(exercise, from: workout)
+                                    guard let userId = supabase.authUserId else { return }
+                                    Task {
+                                        do {
+                                            try await supabase.deleteExercise(
+                                                userId: userId,
+                                                workoutId: workout.id,
+                                                exerciseId: exercise.id
+                                            )
+                                            let serverWorkouts = try await supabase.fetchWorkoutsWithExercises(userId: userId)
+                                            await MainActor.run {
+                                                appState.replaceWorkouts(serverWorkouts)
+                                            }
+                                        } catch {
+                                            // Keep local state unchanged if server delete fails.
+                                        }
+                                    }
                                 }
                             )
                         }
@@ -355,6 +373,7 @@ struct ExerciseRowView: View {
 
 struct EditExerciseView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var supabase: SupabaseService
     let workout: Workout
     let exercise: Exercise
     @Binding var isPresented: Bool
@@ -514,8 +533,23 @@ struct EditExerciseView: View {
             )
         }
         
-        appState.updateExercise(updatedExercise, in: workout)
-        isPresented = false
+        guard let userId = supabase.authUserId else { return }
+        Task {
+            do {
+                try await supabase.updateExercise(
+                    userId: userId,
+                    workoutId: workout.id,
+                    exercise: updatedExercise
+                )
+                let serverWorkouts = try await supabase.fetchWorkoutsWithExercises(userId: userId)
+                await MainActor.run {
+                    appState.replaceWorkouts(serverWorkouts)
+                    isPresented = false
+                }
+            } catch {
+                // Keep sheet open if server update fails.
+            }
+        }
     }
 }
 

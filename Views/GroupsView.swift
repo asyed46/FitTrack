@@ -73,7 +73,18 @@ struct GroupsView: View {
             .onAppear {
                 Task { await refreshGroups() }
             }
+            .task(id: rankReloadKey) {
+                await refreshRanks(for: appState.groups)
+            }
         }
+    }
+
+    private var rankReloadKey: String {
+        let groupPart = appState.groups.map(\.id.uuidString).joined(separator: ",")
+        let userPart = appState.currentUser?.id.uuidString ?? "no-user"
+        let scorePart = Int(appState.currentUser?.totalScore ?? 0)
+        let workoutCountPart = appState.currentUser?.workouts.count ?? 0
+        return "\(userPart)|\(groupPart)|\(scorePart)|\(workoutCountPart)"
     }
 
     @MainActor
