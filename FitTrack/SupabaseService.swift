@@ -132,10 +132,32 @@ final class SupabaseService: ObservableObject {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+
+    private static func storageDateString(from date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        guard
+            let year = components.year,
+            let month = components.month,
+            let day = components.day
+        else {
+            return dateFormatter.string(from: date)
+        }
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    private static func dateFromStorage(_ value: String) -> Date? {
+        guard let parsed = dateFormatter.date(from: value) else { return nil }
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: parsed)
+        return Calendar.current.date(from: DateComponents(
+            year: components.year,
+            month: components.month,
+            day: components.day,
+            hour: 12
+        ))
+    }
 
     init(urlString: String, anonKey: String) {
         guard let url = URL(string: urlString), !anonKey.isEmpty else {
@@ -355,7 +377,7 @@ final class SupabaseService: ObservableObject {
         let exercisesByWorkoutId = Dictionary(grouping: exerciseRows, by: { $0.workoutId })
 
         return workouts.compactMap { row in
-            guard let date = Self.dateFormatter.date(from: row.workoutDate) else { return nil }
+            guard let date = Self.dateFromStorage(row.workoutDate) else { return nil }
             let exRows = exercisesByWorkoutId[row.id] ?? []
             let exercises = exRows.map { ex in
                 Exercise(
@@ -380,7 +402,7 @@ final class SupabaseService: ObservableObject {
             userId: userId,
             title: title,
             notes: notes,
-            workoutDate: Self.dateFormatter.string(from: date),
+            workoutDate: Self.storageDateString(from: date),
             createdAt: nil
         )
 
@@ -400,7 +422,7 @@ final class SupabaseService: ObservableObject {
             userId: userId,
             title: defaultTitle(for: exercises),
             notes: nil,
-            workoutDate: Self.dateFormatter.string(from: date),
+            workoutDate: Self.storageDateString(from: date),
             createdAt: nil
         )
 
